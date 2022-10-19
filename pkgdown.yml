@@ -1,0 +1,12 @@
+pandoc: 2.14.2
+pkgdown: 2.0.6
+pkgdown_sha: ~
+articles:
+  rnai: rnai.html
+  sarm1: sarm1.html
+  tau: tau.html
+last_built: 2022-10-19T22:21Z
+urls:
+  reference: https://tomsing1.github.io/rnaseq-examples/reference
+  article: https://tomsing1.github.io/rnaseq-examples/articles
+
