@@ -1,0 +1,120 @@
+---
+title: "Naguib et al: Global effects of SUPT4H1 RNAi on gene expression."
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{rnai}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup, message=FALSE}
+library(edgeR)
+library(rnaseqExamples)
+library(DESeq2)
+```
+
+The SUPT4H1 protein is a highly conserved transcription elongation factor that
+makes up part of the RNA polymerase II complex. To investigate the role of 
+SUPT4H1 in transcriptional regulation, 
+[Naguib et al](https://www.cell.com/cell-reports/fulltext/S2211-1247(18)31915-6)
+depleted *SUPT4H1* transcripts by RNA interference in HEK293 cells.
+
+Because loss of *SUPT4H1* leads to a global decrease in RNA polymerase II 
+dependent transcription, the authors included spike-ins to allow for
+normalization independent of total gene counts.
+
+The processed RNA-seq data from this study is available from the
+[NCBI GEO (accession GSE116267)](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE116267)
+Reads were aligned to the human reference
+genome (version GRCh38_p10, including sequences of 92 ERCC spike-in transcripts)
+with the
+[STAR aligner (version 2.5.3a)](https://pubmed.ncbi.nlm.nih.gov/23104886/)
+and gene-level abundances were inferred using 
+[salmon (version version 0.9.1)](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5600148/).
+
+A `DESeqDataset` object with raw counts, sample and gene annotations from one of
+the exoeriment published by Naguib et al, RNAi in HEK293 cells, is available 
+in the `rnai`` dataset included in this R package.
+
+```{r}
+data("rnai")
+dds <- rnai
+```
+
+## Differential expression analysis with DESeq2
+
+```{r}
+# filtering, just to speed up computations
+keep <- rowSums(counts(dds) >= 10) >= min(table(dds$group))
+dds <- dds[which(
+  (keep & rowData(dds)$gene_type == "protein_coding") |
+  (rowData(dds)$spikein)), ]
+```
+
+```{r}
+dds <- estimateSizeFactors(dds, controlGenes = which(rowData(dds)$spikein))
+dds <- DESeq(dds)
+```
+
+```{r}
+res <- results(dds,
+               contrast = c("group", "RNAi", "Ctrl"),
+               alpha = 0.1)  # only used to optimize IHW
+table(res$padj < 0.01 & abs(res$log2FoldChange) > 0.5)
+```
+
+As reported in the original manuscript, the vast majority of genes shows
+decreased transcription following *SUPT4H1* RNAi treatment.
+
+```{r fig.width=5, fig.height=4}
+hist(res$log2FoldChange, breaks = 100, xlim = c(-2, 2),
+     xlab = "RNAi vs Ctrl (log2FC)", main = "RNAi vs Ctrl")
+abline(v = 0, lwd = 2, col = "red")
+title(sub = "DESeq2")
+```
+
+## Limma / Voom analysis
+
+Alternatively, we can perform the same analysis using the 
+[limma/voom](https://genomebiology.biomedcentral.com/articles/10.1186/gb-2014-15-2-r29)
+framework, specifically the `voomLmFit()` function from the 
+[edgeR](https://bioconductor.org/packages/release/bioc/html/edgeR.html)
+Bioconductor package.
+
+```{r}
+design <- model.matrix(~ 0 + group, data = colData(dds))
+colnames(design) <- sub("group", "", colnames(design))
+keep <- filterByExpr(dds, design = design)
+fit <- voomLmFit(
+  counts = dds,
+  design = design,
+  plot = FALSE,
+  # use only the spike-ins to calculate library size
+  lib.size = colSums(counts(dds)[rowData(dds)$spikein, ]), 
+  sample.weights = TRUE)
+contrasts = makeContrasts(
+  "RNAi - Ctrl",
+  levels = design
+)
+fit2 <- contrasts.fit(fit, contrasts = contrasts)
+fit2 <- eBayes(fit2)
+tt <- topTable(fit2, n = Inf)[, c("symbol", "logFC", "P.Value", "adj.P.Val")]
+```
+
+```{r fig.width=5, fig.height=4}
+hist(tt$logFC, breaks = 100, xlim = c(-2, 2), xlab = "RNAi vs Ctrl (log2FC)",
+     main = "SUPT4H1 RNAi vs Ctrl")
+abline(v = 0, lwd = 2, col = "red")
+title(sub = "limma/voom")
+```
+
+```{r sessionInfo}
+sessionInfo()
+```

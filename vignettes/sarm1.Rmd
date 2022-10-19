@@ -1,0 +1,114 @@
+---
+title: "Zhu et al: Effects of SARM1 deficiency on gene expression"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{sarm1}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup, message=FALSE}
+library(DESeq2)
+library(edgeR)
+library(rnaseqExamples)
+library(statmod)  # required for robust estimates using eBayes()
+```
+
+In 2019, 
+[Zhu et al](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6446871/)
+examined gene expression differences between SARM1 deficient and wildtype 
+mouse brains. The authors reported that only a very small number of genes was
+significantly differentially expressed between the two genotypes in this model,
+including the *Sarm1* and its neighboring gene, *Xaf1*. 
+
+**Note:** In 2020,
+[Uccellini et al](https://www.cell.com/cell-reports/fulltext/S2211-1247(20)30387-9)
+demonstrated that differential *Xaf1* expression is _not_ dependent on the
+presence of *Sarm1*, but was actually an artifact due to passenger mutations
+present in the specific Sarm1 knock-out mouse model used by Zhu et al.
+
+A `DESeqDataset` object with raw counts, sample and gene annotations from the
+original study by Zhu et al is
+available in the `sarm1` dataset included in this R package.
+
+The raw RNA-seq data from this study is available from the
+[Short Read Archive, accession SRP178253](https://www.ncbi.nlm.nih.gov/sra?term=SRP178253)
+Reads were aligned to the mouse reference
+genome (version GRCm38_p6, Gencode release release_M17) with the
+[STAR aligner (version 2.7.1a)](https://pubmed.ncbi.nlm.nih.gov/23104886/)
+and gene-level abundances were inferred from the BAM files using 
+[salmon (version 0.13.1)](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5600148/).
+
+```{r}
+data("sarm1")
+dds <- sarm1
+```
+
+## Differential expression analysis with DESeq2
+
+```{r}
+# filtering, just to speed up computations
+keep <- rowSums(counts(dds) >= 10) >= min(table(dds$group))
+dds <- dds[which(keep & rowData(dds)$gene_type == "protein_coding"), ]
+dds <- DESeq(dds)
+```
+
+```{r}
+res <- results(dds, contrast = c("group", "KO_ctrl", "WT_ctrl"))
+data.frame(
+  symbol = rowData(dds)[row.names(res[res$padj < 0.01, ]), c("symbol")],
+  res[res$padj < 0.01, ]
+)
+```
+
+```{r fig.width=6, fig.height=5}
+DESeq2::plotMA(res)
+```
+
+```{r fig.width=6, fig.height=5}
+plotCounts(dds, gene = which.min(res$padj), intgroup="group", 
+           main = rowData(dds)[which.min(res$padj), "symbol"])
+```
+
+## Limma / Voom analysis
+
+Alternatively, we can perform the same analysis using the 
+[limma/voom](https://genomebiology.biomedcentral.com/articles/10.1186/gb-2014-15-2-r29)
+framework, specifically the `voomLmFit()` function from the 
+[edgeR](https://bioconductor.org/packages/release/bioc/html/edgeR.html)
+Bioconductor package.
+
+```{r}
+design <- model.matrix(~ 0 + group, data = colData(dds))
+colnames(design) <- sub("group", "", colnames(design))
+```
+
+```{r fig.width=5, fig.height=5}
+keep <- filterByExpr(dds, design = design)
+fit <- voomLmFit(
+  counts = dds[keep & rowData(dds)$gene_type == "protein_coding", ],
+  design = design,
+  plot = TRUE,
+  sample.weights = TRUE)
+
+contrasts = makeContrasts(
+  SARM1_untreated = "KO_ctrl - WT_ctrl",
+  prion_wt = "WT_prion - WT_ctrl",
+  levels = design
+)
+fit2 <- contrasts.fit(fit, contrasts = contrasts)
+fit2 <- eBayes(fit2, robust = TRUE)
+topTable(fit2, coef = "SARM1_untreated",
+         p.value = 0.05)[, c("symbol", "logFC", "P.Value", "adj.P.Val")]
+```
+
+```{r sessionInfo}
+sessionInfo()
+```

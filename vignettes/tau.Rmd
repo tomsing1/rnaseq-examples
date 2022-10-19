@@ -1,0 +1,113 @@
+---
+title: "Wang et al: time course of microglia from the rTg4510 mouse model"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{rTg4510}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup, message=FALSE}
+library(DESeq2)
+library(edgeR)
+library(rnaseqExamples)
+```
+
+In 2018, 
+[Wang et al](https://www.ncbi.nlm.nih.gov/pubmed/30558641)
+published the transcriptome analysis of mouse microglia, isolated either from
+the 
+[rTg4510 mouse model](https://www.alzforum.org/research-models/rtgtaup301l4510)
+or wildtype animals. Four age groups of mice (2-, 4-, 6-, and 8-months) were
+analyzed to capture longitudinal gene expression changes that correspond to
+varying levels of pathology, from minimal tau accumulation to massive neuronal
+loss. 
+
+The raw RNA-seq data from this study is available from the
+[Short Read Archive, accession SRP172787](https://www.ncbi.nlm.nih.gov/sra?term=SRP172787)
+Reads were aligned to the mouse reference
+genome (version GRCm38_p6, Gencode release release_M17) with the
+[STAR aligner (version 2.7.1a)](https://pubmed.ncbi.nlm.nih.gov/23104886/)
+and gene-level abundances were inferred from the BAM files using 
+[salmon (version 0.13.1)](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5600148/).
+
+A `DESeqDataset` object with raw counts, sample and gene annotations is
+available in the `tau` dataset included in this R package.
+
+```{r}
+data("tau")
+dds <- tau
+```
+
+## Differential expression analysis with DESeq2
+
+```{r}
+# filtering, just to speed up computations
+keep <- rowSums(counts(dds) >= 10) >= min(table(dds$group))
+dds <- dds[which(keep & rowData(dds)$gene_type == "protein_coding"), ]
+dds <- DESeq(dds)
+```
+
+```{r}
+res <- results(dds, contrast = c("group", "rTg4510_2", "WT_2"))
+res <- res[order(res$pvalue), ]
+top_hits <- head(row.names(res))
+data.frame(
+  symbol = rowData(dds)[top_hits, c("symbol")],
+  res[top_hits, ]
+)
+```
+
+```{r fig.width=6, fig.height=5}
+DESeq2::plotMA(res)
+```
+
+```{r fig.width=10, fig.height=5}
+plotCounts(dds, gene = top_hits[1], intgroup="group", 
+           main = rowData(dds)[top_hits[1], "symbol"])
+```
+
+## Limma / Voom analysis
+
+Alternatively, we can perform the same analysis using the 
+[limma/voom](https://genomebiology.biomedcentral.com/articles/10.1186/gb-2014-15-2-r29)
+framework, specifically the `voomLmFit()` function from the 
+[edgeR](https://bioconductor.org/packages/release/bioc/html/edgeR.html)
+Bioconductor package.
+
+```{r}
+design <- model.matrix(~ 0 + group, data = colData(dds))
+colnames(design) <- sub("group", "", colnames(design))
+```
+
+```{r fig.width=5, fig.height=5}
+keep <- filterByExpr(dds, design = design)
+fit <- voomLmFit(
+  counts = dds[keep & rowData(dds)$gene_type == "protein_coding", ],
+  design = design,
+  plot = TRUE,
+  sample.weights = TRUE)
+
+contrasts = makeContrasts(
+  two_months = "rTg4510_2 - WT_2",
+  four_months = "rTg4510_4 - WT_4",
+  six_months = "rTg4510_6 - WT_6",
+  eight_months = "rTg4510_8 - WT_8",
+  levels = design
+)
+fit2 <- contrasts.fit(fit, contrasts = contrasts)
+fit2 <- eBayes(fit2)
+topTable(fit2, coef = "two_months",
+         p.value = 0.05)[, c("symbol", "logFC", "P.Value", "adj.P.Val")]
+```
+
+```{r sessionInfo}
+sessionInfo()
+```
