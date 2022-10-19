@@ -23,4 +23,4 @@ You can install the development version of rnaseqExamples from
 devtools::install_github("tomsing1/rnaseq-examples")
 ```
 
-Please check out the vignettes!
+Please check out the vignettes / articles!

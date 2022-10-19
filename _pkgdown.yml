@@ -1,4 +1,11 @@
 url: https://tomsing1.github.io/rnaseq-examples/
 template:
   bootstrap: 5
+  bootswatch: cosmo
+authors:
+  Thomas Sandmann
+navbar:
+  left:
+    - text: "Articles"
+      href: articles/index.html
 
